@@ -63,8 +63,8 @@ class Spectrogram(Layer):
     A Keras layer
 
      * abs(Spectrogram) in a shape of 2D data, i.e.,
-     * `(None, n_channel, n_freq, n_time)` if `'channels_first'`,
-     * `(None, n_freq, n_time, n_channel)` if `'channels_last'`,
+     * `(None, n_channel, n_time, n_freq, )` if `'channels_first'`,
+     * `(None, n_time, n_freq, n_channel)` if `'channels_last'`,
 
 
     """
@@ -97,8 +97,8 @@ class Spectrogram(Layer):
         super(Spectrogram, self).__init__(**kwargs)
 
     def build(self, input_shape):
-        self.n_ch = input_shape[2]
         self.len_src = input_shape[1]
+        self.n_ch = input_shape[2]
         self.is_mono = (self.n_ch == 1)
         if self.image_data_format == 'channels_first':
             self.ch_axis_idx = 1
@@ -128,18 +128,18 @@ class Spectrogram(Layer):
 
     def compute_output_shape(self, input_shape):
         if self.image_data_format == 'channels_first':
-            return input_shape[0], self.n_ch, self.n_filter, self.n_frame
+            return input_shape[0], self.n_ch, self.n_frame, self.n_filter
         else:
-            return input_shape[0], self.n_filter, self.n_frame, self.n_ch
+            return input_shape[0], self.n_frame, self.n_filter, self.n_ch
 
     def call(self, x):
         output = self._spectrogram_mono(x[:, :, 0:1])
         if self.is_mono is False:
             for ch_idx in range(1, self.n_ch):
                 output = K.concatenate((output,
-                                        self._spectrogram_mono(x[:, :, ch_idx:ch_idx + 1])),
+                                       self._spectrogram_mono(x[:, :, ch_idx:ch_idx + 1])),
                                        axis=self.ch_axis_idx)
-        output = output[..., 0]
+        # output = output[..., 0]
         if self.power_spectrogram != 2.0:
             output = K.pow(K.sqrt(output), self.power_spectrogram)
         if self.return_decibel_spectrogram:
@@ -160,7 +160,6 @@ class Spectrogram(Layer):
     def _spectrogram_mono(self, x):
         '''x.shape : (None, len_src, 1),
         returns 2D batch of a mono power-spectrogram'''
-        # x = K.permute_dimensions(x, [0, 2, 1])
         x = K.expand_dims(x, 3)  # add a dummy dimension (channel axis)
         subsample = (self.n_hop, 1)
         output_real = K.conv2d(x, self.dft_real_kernels,
@@ -284,7 +283,7 @@ d
     def build(self, input_shape):
         super(Melspectrogram, self).build(input_shape)
         self.built = False
-        # compute freq2mel matrix --> 
+        # compute freq2mel matrix -->
         mel_basis = backend.mel(self.sr, self.n_dft, self.n_mels, self.fmin, self.fmax,
                                 self.htk, self.norm)  # (128, 1025) (mel_bin, n_freq)
         mel_basis = np.transpose(mel_basis)
@@ -306,10 +305,11 @@ d
         power_spectrogram = super(Melspectrogram, self).call(x)
         # now,  channels_first: (batch_sample, n_ch, n_freq, n_time)
         #       channels_last: (batch_sample, n_freq, n_time, n_ch)
+        print(x.shape, power_spectrogram.shape)
         if self.image_data_format == 'channels_first':
-            power_spectrogram = K.permute_dimensions(power_spectrogram, [0, 1, 3, 2])
+            power_spectrogram = K.permute_dimensions(power_spectrogram, [0, 1, 2, 3])
         else:
-            power_spectrogram = K.permute_dimensions(power_spectrogram, [0, 3, 2, 1])
+            power_spectrogram = K.permute_dimensions(power_spectrogram, [0, 3, 1, 2])
         # now, whatever image_data_format, (batch_sample, n_ch, n_time, n_freq)
         output = K.dot(power_spectrogram, self.freq2mel)
         if self.image_data_format == 'channels_first':
